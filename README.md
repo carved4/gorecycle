@@ -51,4 +51,4 @@ the flow works like this:
 ## credits
 
 - [RecycledGate Rust Implementation](https://github.com/Whitecat18/Rust-for-Malware-Development/tree/main/syscalls/RecycledGate) - original rust implementation
-- [RecycledGate C++ Implementation](https://github.com/thefLink/RecycledGate) - original technique and c++ implementation
+- [RecycledGate C++ Implementation](https://github.com/thefLink/RecycledGate) - original technique and c implementation
