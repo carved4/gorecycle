@@ -43,7 +43,7 @@ the flow works like this:
 ## features
 
 - automatic ntdll base resolution via PEB walking
-- comprehensive syscall dumping (SSN 0-947 with names/addresses)
+- all syscalls addr, ssn, name dumped
 - hook detection and clean gate discovery
 - shellcode injection via recycled syscalls (spawn calc via notepad.exe apc queue from suspended state)
 - wincall integration for standard win32 api call to createprocess, could be done with nt call but i like my wincall package
