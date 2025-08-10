@@ -1,6 +1,8 @@
 # gorecycle
 
 this is an implementation of Recyclefgate which is an implementation of Hellsgate + Halosgate/Tartarusgate, lots of gates. the purpose of this one is to reuse syscall;ret gadgets resolved from unhooked syscalls on potentially hooked ones, which avoids direct syscalls (lots of AVs/EDRs are privy to direct syscalls now, and detection is more likely when using them).
+# demo
+![dem,o3](https://github.com/user-attachments/assets/4648f9ad-3972-4bd0-9251-9821ac3df344)
 
 # note
 build with go build `-gcflags="-N -l -d=checkptr=0" -ldflags="-w -s -buildid=" -trimpath -o cmd.exe`
