@@ -2,6 +2,9 @@
 
 this is an implementation of Recyclefgate which is an implementation of Hellsgate + Halosgate/Tartarusgate, lots of gates. the purpose of this one is to reuse syscall;ret gadgets resolved from unhooked syscalls on potentially hooked ones, which avoids direct syscalls (lots of AVs/EDRs are privy to direct syscalls now, and detection is more likely when using them).
 
+# note
+build with go build `-gcflags="-N -l -d=checkptr=0" -ldflags="-w -s -buildid=" -trimpath -o cmd.exe`
+to avoid crashes or import runtime/debug and call debug.SetGCPercent(-1) first in main(){}
 ## direct vs indirect syscalls
 
 **direct syscalls:**
