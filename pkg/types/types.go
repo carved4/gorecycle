@@ -171,8 +171,8 @@ type PEB struct {
 }
 
 type Syscall struct {
-	SyscallNr    uint16
-	RecycledGate uintptr
+	Nr    uint16
+	Gate uintptr
 }
 
 type StartupInfo struct {
