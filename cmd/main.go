@@ -5,10 +5,10 @@ import (
 	"unsafe"
 	"strconv"
 	"github.com/carved4/go-wincall"
-	"gorecycle/pkg/syscall"
-	rc "gorecycle/pkg/recycle"
-	"gorecycle/pkg/dump"
-	"gorecycle/pkg/types"
+	"github.com/carved4/gorecycle/pkg/syscall"
+	rc "github.com/carved4/gorecycle/pkg/recycle"
+	"github.com/carved4/gorecycle/pkg/dump"
+	"github.com/carved4/gorecycle/pkg/types"
 )
 
 

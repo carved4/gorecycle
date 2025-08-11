@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"unsafe"
 	"strings"
-	rc "gorecycle/pkg/recycle"
-	"gorecycle/pkg/types"
+	rc "github.com/carved4/gorecycle/pkg/recycle"
+	"github.com/carved4/gorecycle/pkg/types"
 )
 
 

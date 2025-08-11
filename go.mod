@@ -1,4 +1,4 @@
-module gorecycle
+module github.com/carved4/gorecycle
 
 go 1.24.6
 

@@ -6,8 +6,8 @@ import (
 	"unsafe"
 	"strings"
 	"time"
-	"gorecycle/pkg/syscall"
-	"gorecycle/pkg/types"
+	"github.com/carved4/gorecycle/pkg/syscall"
+	"github.com/carved4/gorecycle/pkg/types"
 )
 
 const (
