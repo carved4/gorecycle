@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"unsafe"
 	"strconv"
+	// this import is unneeded, but i left it because i am proud of my project and want to use it
+	// you could resolve and call ntclose 
 	"github.com/carved4/go-wincall"
 	"github.com/carved4/gorecycle/pkg/syscall"
 	rc "github.com/carved4/gorecycle/pkg/recycle"

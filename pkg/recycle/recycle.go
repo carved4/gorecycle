@@ -232,14 +232,70 @@ func GetSyscall(apiName string, sys *types.Syscall) bool {
 	stubBytes := (*[SYS_STUB_SIZE]byte)(unsafe.Pointer(stub))
 
 	for i := 0; i < SYS_STUB_SIZE; i++ {
+		// relative jump (0xe9), most common hook pattern
 		if stubBytes[i] == 0xe9 {
 			hooked = true
 			break
 		}
+		// short jump (0xeb)
+		if stubBytes[i] == 0xeb {
+			hooked = true
+			break
+		}
+		// absolute jump patterns (0xff /4 or /5)
+		if stubBytes[i] == 0xff && i+1 < SYS_STUB_SIZE {
+			// check for jmp [mem] (0xff 25) or jmp reg (0xff e0-e7, 0xff 20-27)
+			nextByte := stubBytes[i+1]
+			if nextByte == 0x25 || // jmp [rip+disp32]
+				(nextByte >= 0xe0 && nextByte <= 0xe7) || // jmp reg
+				(nextByte >= 0x20 && nextByte <= 0x27) {   // jmp [reg]
+				hooked = true
+				break
+			}
+		}
+		// push + ret pattern (0x48 0xb8 ... 0xc3 or 0x68 ... 0xc3)
+		if stubBytes[i] == 0x48 && i+9 < SYS_STUB_SIZE && stubBytes[i+1] == 0xb8 {
+			// mov rax, imm64; jmp rax or similar patterns
+			for j := i + 2; j < i + 10 && j < SYS_STUB_SIZE; j++ {
+				if stubBytes[j] == 0xff && j+1 < SYS_STUB_SIZE && stubBytes[j+1] == 0xe0 {
+					hooked = true
+					break
+				}
+			}
+			if hooked {
+				break
+			}
+		}
+		// push immediate + ret (0x68 ... 0xc3)
+		if stubBytes[i] == 0x68 && i+5 < SYS_STUB_SIZE {
+			// look for ret within next few bytes
+			for j := i + 5; j < i + 8 && j < SYS_STUB_SIZE; j++ {
+				if stubBytes[j] == 0xc3 {
+					hooked = true
+					break
+				}
+			}
+			if hooked {
+				break
+			}
+		}
+		// int3/breakpoint (0xcc) debugger hooks
+		if stubBytes[i] == 0xcc {
+			hooked = true
+			break
+		}
+		// multiple NOPs (0x90) potential nop sled indicating patching
+		if stubBytes[i] == 0x90 && i+2 < SYS_STUB_SIZE && 
+		   stubBytes[i+1] == 0x90 && stubBytes[i+2] == 0x90 {
+			hooked = true
+			break
+		}
+		// early return indicates stub was patched
 		if stubBytes[i] == 0xc3 {
 			return false
 		}
 
+		// look for clean syscall pattern
 		if i+7 < SYS_STUB_SIZE &&
 			stubBytes[i] == 0x4c && stubBytes[i+1] == 0x8b && stubBytes[i+2] == 0xd1 &&
 			stubBytes[i+3] == 0xb8 && stubBytes[i+6] == 0x00 && stubBytes[i+7] == 0x00 {
@@ -255,37 +311,100 @@ func GetSyscall(apiName string, sys *types.Syscall) bool {
 	if hooked {
 		numFunctions := int(exportDir.NumberOfFunctions)
 		found := false
-
+		// search both directions for clean syscall stubs to recycle
 		for offset := 1; offset <= numFunctions; offset++ {
 			downAddr := stub + uintptr(offset*DOWN)
 			upAddr := stub + uintptr(offset*UP)
+			
+			// check down direction (higher addresses)
 			if downAddr >= ntdllBase && downAddr < ntdllBase+0x100000 {
-				downBytes := (*[8]byte)(unsafe.Pointer(downAddr))
-				if downBytes[0] == 0x4c && downBytes[1] == 0x8b && downBytes[2] == 0xd1 &&
-					downBytes[3] == 0xb8 && downBytes[6] == 0x00 && downBytes[7] == 0x00 {
-					high := downBytes[5]
-					low := downBytes[4]
-					syscallNr = uint16(high)<<8|uint16(low) - uint16(offset)
-					gateStub = downAddr
-					found = true
+				downBytes := (*[SYS_STUB_SIZE]byte)(unsafe.Pointer(downAddr))
+				
+				// verify this is a clean stub
+				isCleanDown := true
+				for k := 0; k < SYS_STUB_SIZE && k < 16; k++ {
+					// ceck for hook patterns in potential clean stub
+					if downBytes[k] == 0xe9 || downBytes[k] == 0xeb || downBytes[k] == 0xcc ||
+					   (downBytes[k] == 0xff && k+1 < SYS_STUB_SIZE && 
+					    (downBytes[k+1] == 0x25 || 
+					     (downBytes[k+1] >= 0xe0 && downBytes[k+1] <= 0xe7) ||
+					     (downBytes[k+1] >= 0x20 && downBytes[k+1] <= 0x27))) {
+						isCleanDown = false
+						break
+					}
+					// check for nop sled
+					if k+2 < SYS_STUB_SIZE && downBytes[k] == 0x90 && 
+					   downBytes[k+1] == 0x90 && downBytes[k+2] == 0x90 {
+						isCleanDown = false
+						break
+					}
+				}
+				
+				// if clean look for syscall pattern
+				if isCleanDown {
+					for k := 0; k < SYS_STUB_SIZE-7; k++ {
+						if downBytes[k] == 0x4c && downBytes[k+1] == 0x8b && downBytes[k+2] == 0xd1 &&
+							downBytes[k+3] == 0xb8 && downBytes[k+6] == 0x00 && downBytes[k+7] == 0x00 {
+							high := downBytes[k+5]
+							low := downBytes[k+4]
+							syscallNr = uint16(high)<<8|uint16(low) - uint16(offset)
+							gateStub = downAddr
+							found = true
+							break
+						}
+					}
+				}
+				if found {
 					break
 				}
 			}
+			
+			// check up direction (lower addresses)
 			if upAddr >= ntdllBase && upAddr < ntdllBase+0x100000 {
-				upBytes := (*[8]byte)(unsafe.Pointer(upAddr))
-				if upBytes[0] == 0x4c && upBytes[1] == 0x8b && upBytes[2] == 0xd1 &&
-					upBytes[3] == 0xb8 && upBytes[6] == 0x00 && upBytes[7] == 0x00 {
-					high := upBytes[5]
-					low := upBytes[4]
-					syscallNr = uint16(high)<<8|uint16(low) + uint16(offset)
-					gateStub = upAddr
-					found = true
+				upBytes := (*[SYS_STUB_SIZE]byte)(unsafe.Pointer(upAddr))
+				
+				// verify this is a clean stub
+				isCleanUp := true
+				for k := 0; k < SYS_STUB_SIZE && k < 16; k++ {
+					// check for hook patterns in potential clean stub
+					if upBytes[k] == 0xe9 || upBytes[k] == 0xeb || upBytes[k] == 0xcc ||
+					   (upBytes[k] == 0xff && k+1 < SYS_STUB_SIZE && 
+					    (upBytes[k+1] == 0x25 || 
+					     (upBytes[k+1] >= 0xe0 && upBytes[k+1] <= 0xe7) ||
+					     (upBytes[k+1] >= 0x20 && upBytes[k+1] <= 0x27))) {
+						isCleanUp = false
+						break
+					}
+					// check for nop sled (not sure EDRs do this, i have been unable to test any of my stuff against a "hooked" environment)
+					// beyond avast free, whom im not sure installs hooks
+					if k+2 < SYS_STUB_SIZE && upBytes[k] == 0x90 && 
+					   upBytes[k+1] == 0x90 && upBytes[k+2] == 0x90 {
+						isCleanUp = false
+						break
+					}
+				}
+				
+				// if clean we look for syscall pattern
+				if isCleanUp {
+					for k := 0; k < SYS_STUB_SIZE-7; k++ {
+						if upBytes[k] == 0x4c && upBytes[k+1] == 0x8b && upBytes[k+2] == 0xd1 &&
+							upBytes[k+3] == 0xb8 && upBytes[k+6] == 0x00 && upBytes[k+7] == 0x00 {
+							high := upBytes[k+5]
+							low := upBytes[k+4]
+							syscallNr = uint16(high)<<8|uint16(low) + uint16(offset)
+							gateStub = upAddr
+							found = true
+							break
+						}
+					}
+				}
+				if found {
 					break
 				}
 			}
 		}
 		if !found {
-			fmt.Println("[-] unable to find clean syscall gate")
+			fmt.Println("[-] unable to find clean syscall gate using RecycleGate method")
 			return false
 		}
 	}
