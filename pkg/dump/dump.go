@@ -1,121 +1,69 @@
 package dump
 
 import (
-	"fmt"
-	"unsafe"
-	"strings"
-	rc "github.com/carved4/gorecycle/pkg/recycle"
-	"github.com/carved4/gorecycle/pkg/types"
+    "fmt"
+    "sort"
+    "unsafe"
+    "strings"
+    rc "github.com/carved4/gorecycle/pkg/recycle"
+    "github.com/carved4/gorecycle/pkg/types"
 )
 
 
 func DumpAllSyscalls() {
-	fmt.Println("[+] dumping all syscalls 0->947")
+    fmt.Println("[+] dumping all syscalls (via cached resolver)")
 
-	ntdllBase := rc.FindNtdll()
-	if ntdllBase == 0 {
-		fmt.Println("[-] ntdll base is null")
-		return
-	}
+    r := rc.Default()
+    if r == nil {
+        fmt.Println("[-] resolver is nil")
+        return
+    }
+    base := rc.FindNtdll()
+    if base == 0 {
+        fmt.Println("[-] ntdll base is null")
+        return
+    }
 
-	dosHeader := (*types.ImageDosHeader)(unsafe.Pointer(ntdllBase))
-	if dosHeader == nil || dosHeader.Signature != 0x5A4D {
-		fmt.Println("[-] invalid DOS header")
-		return
-	}
+    exportDir := (*types.ImageExportDirectory)(unsafe.Pointer(base + uintptr((*types.ImageNtHeaders)(unsafe.Pointer(base+uintptr((*types.ImageDosHeader)(unsafe.Pointer(base)).ElfanewOffset))).OptionalHeader.DataDirectory[0].VirtualAddress)))
+    if exportDir == nil {
+        fmt.Println("[-] export directory is null")
+        return
+    }
 
-	ntHeaders := (*types.ImageNtHeaders)(unsafe.Pointer(ntdllBase + uintptr(dosHeader.ElfanewOffset)))
-	if ntHeaders == nil || ntHeaders.Signature != 0x00004550 {
-		fmt.Println("[-] invalid NT headers")
-		return
-	}
+    names := (*[65536]uint32)(unsafe.Pointer(base + uintptr(exportDir.AddressOfNames)))
+    ords := (*[65536]uint16)(unsafe.Pointer(base + uintptr(exportDir.AddressOfNameOrdinals)))
+    funs := (*[65536]uint32)(unsafe.Pointer(base + uintptr(exportDir.AddressOfFunctions)))
 
-	exportDirRva := ntHeaders.OptionalHeader.DataDirectory[0].VirtualAddress
-	if exportDirRva == 0 {
-		fmt.Println("[-] no export directory")
-		return
-	}
+    type row struct{ ssn uint16; addr uintptr; name string }
+    var rows []row
 
-	exportDir := (*types.ImageExportDirectory)(unsafe.Pointer(ntdllBase + uintptr(exportDirRva)))
-	if exportDir == nil {
-		fmt.Println("[-] export directory is null")
-		return
-	}
+    for i := uint32(0); i < exportDir.NumberOfNames; i++ {
+        nameRva := names[i]
+        namePtr := (*[256]byte)(unsafe.Pointer(base + uintptr(nameRva)))
+        var name string
+        for j := 0; j < 256; j++ {
+            if namePtr[j] == 0 { break }
+            name += string(namePtr[j])
+        }
+        if !strings.HasPrefix(name, "Zw") { continue }
 
-	addressOfFunctions := (*[65536]uint32)(unsafe.Pointer(ntdllBase + uintptr(exportDir.AddressOfFunctions)))
-	addressOfNames := (*[65536]uint32)(unsafe.Pointer(ntdllBase + uintptr(exportDir.AddressOfNames)))
-	addressOfNameOrdinals := (*[65536]uint16)(unsafe.Pointer(ntdllBase + uintptr(exportDir.AddressOfNameOrdinals)))
+        // Try resolving via cached logic (gives SSN + gate); still print original export address
+        var s types.Syscall
+        ntName := "Nt" + name[2:]
+        if !r.Find(ntName, &s) && !r.Find(name, &s) {
+            continue
+        }
+        ordinal := ords[i]
+        stub := base + uintptr(funs[ordinal])
+        rows = append(rows, row{ssn: s.Nr, addr: stub, name: ntName})
+    }
 
-	syscallMap := make(map[uint16]string)
-	for i := uint32(0); i < exportDir.NumberOfNames; i++ {
-		nameRva := addressOfNames[i]
-		namePtr := (*[256]byte)(unsafe.Pointer(ntdllBase + uintptr(nameRva)))
-		
-		var name string
-		for j := 0; j < 256; j++ {
-			if namePtr[j] == 0 {
-				break
-			}
-			name += string(namePtr[j])
-		}
-		if !strings.HasPrefix(name, "Zw") {
-			continue
-		}
+    sort.Slice(rows, func(i, j int) bool { return rows[i].ssn < rows[j].ssn })
 
-		ordinal := addressOfNameOrdinals[i]
-		funcRva := addressOfFunctions[ordinal]
-		stub := ntdllBase + uintptr(funcRva)
-		stubBytes := (*[rc.SYS_STUB_SIZE]byte)(unsafe.Pointer(stub))
-		for k := 0; k < rc.SYS_STUB_SIZE-7; k++ {
-			if stubBytes[k] == 0x4c && stubBytes[k+1] == 0x8b && stubBytes[k+2] == 0xd1 &&
-				stubBytes[k+3] == 0xb8 && stubBytes[k+6] == 0x00 && stubBytes[k+7] == 0x00 {
-				low := stubBytes[k+4]
-				high := stubBytes[k+5]
-				syscallNr := uint16(high)<<8 | uint16(low)
-				
-				if syscallNr <= 947 {
-					// actual stubs r in zw but print nt for display
-					displayName := name
-					if strings.HasPrefix(name, "Zw") {
-						displayName = "Nt" + name[2:]
-					}
-					syscallMap[syscallNr] = displayName
-				}
-				break
-			}
-		}
-	}
-
-	fmt.Printf("SSN\tAddress\t\tName\n")
-	fmt.Printf("---\t-------\t\t----\n")
-	
-	count := 0
-	for ssn := uint16(0); ssn <= 947; ssn++ {
-		if name, exists := syscallMap[ssn]; exists {
-			// Get function address for this syscall
-			for i := uint32(0); i < exportDir.NumberOfNames; i++ {
-				nameRva := addressOfNames[i]
-				namePtr := (*[256]byte)(unsafe.Pointer(ntdllBase + uintptr(nameRva)))
-				
-				var exportName string
-				for j := 0; j < 256; j++ {
-					if namePtr[j] == 0 {
-						break
-					}
-					exportName += string(namePtr[j])
-				}
-
-				if exportName == name {
-					ordinal := addressOfNameOrdinals[i]
-					funcRva := addressOfFunctions[ordinal]
-					funcAddr := ntdllBase + uintptr(funcRva)
-					fmt.Printf("%d\t0x%x\t%s\n", ssn, funcAddr, name)
-					count++
-					break
-				}
-			}
-		}
-	}
-	
-	fmt.Printf("\n[+] found %d syscalls\n", count)
+    fmt.Printf("SSN\tAddress\t\tName\n")
+    fmt.Printf("---\t-------\t\t----\n")
+    for _, r := range rows {
+        fmt.Printf("%d\t0x%x\t%s\n", r.ssn, r.addr, r.name)
+    }
+    fmt.Printf("\n[+] found %d syscalls\n", len(rows))
 }

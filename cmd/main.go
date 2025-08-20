@@ -1,16 +1,15 @@
 package main
 
 import (
-	"fmt"
-	"unsafe"
-	"strconv"
-	// this import is unneeded, but i left it because i am proud of my project and want to use it
-	// you could resolve and call ntclose 
-	"github.com/carved4/go-wincall"
-	"github.com/carved4/gorecycle/pkg/syscall"
-	rc "github.com/carved4/gorecycle/pkg/recycle"
-	"github.com/carved4/gorecycle/pkg/dump"
-	"github.com/carved4/gorecycle/pkg/types"
+    "flag"
+    "fmt"
+    "unsafe"
+    "strconv"
+    "github.com/carved4/go-wincall"
+    "github.com/carved4/gorecycle/pkg/syscall"
+    rc "github.com/carved4/gorecycle/pkg/recycle"
+    "github.com/carved4/gorecycle/pkg/dump"
+    "github.com/carved4/gorecycle/pkg/types"
 )
 
 
@@ -26,11 +25,15 @@ func getEmbeddedShellcode() []byte {
 	return bytes
 }
 func main() {
-	fmt.Println("[+] gorecycle - self injection")
+    dumpFlag := flag.Bool("dump", false, "dump resolved syscalls (SSR, address, name)")
+    flag.Parse()
 
+    fmt.Println("[+] gorecycle - self injection")
 
-	dump.DumpAllSyscalls()
-	fmt.Println()
+    if *dumpFlag {
+        dump.DumpAllSyscalls()
+        fmt.Println()
+    }
 
 	var ntAllocateVirtualMemory types.Syscall
 	var ntWriteVirtualMemory types.Syscall
